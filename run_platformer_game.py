@@ -8,6 +8,61 @@ import os
 import subprocess
 import sys
 
+import cv2
+
+
+def list_available_cameras(max_cameras=5):
+    """List available cameras and return a list of valid indices."""
+    available_cameras = []
+
+    print("\nDetecting available cameras...")
+    for i in range(max_cameras):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret:
+                camera_name = f"Camera {i}"
+                if i == 0:
+                    camera_name += " (Usually built-in)"
+                elif i == 1:
+                    camera_name += " (Usually external)"
+                print(f"  {i}: {camera_name} - Available")
+                available_cameras.append(i)
+            cap.release()
+
+    return available_cameras
+
+
+def choose_camera():
+    """Let the user choose which camera to use."""
+    available_cameras = list_available_cameras()
+
+    if not available_cameras:
+        print("No cameras detected. Exiting.")
+        return None
+
+    if len(available_cameras) == 1:
+        print(f"\nOnly one camera detected. Using camera index {available_cameras[0]}.")
+        return available_cameras[0]
+
+    while True:
+        try:
+            selection = input(
+                "\nSelect camera by index (or press Enter for default camera 0): "
+            )
+            if selection == "":
+                return 0
+
+            selection = int(selection)
+            if selection in available_cameras:
+                return selection
+            else:
+                print(
+                    f"Invalid selection. Please choose from available cameras: {available_cameras}"
+                )
+        except ValueError:
+            print("Please enter a valid number.")
+
 
 def main():
     """Run the platformer game."""
@@ -20,7 +75,7 @@ def main():
 
     # Check if dependencies are installed
     try:
-        requirements_file = os.path.join(script_dir, "simplified_requirements.txt")
+        requirements_file = os.path.join(script_dir, "requirements.txt")
         if os.path.exists(requirements_file):
             print("Checking and installing dependencies...")
             try:
@@ -35,6 +90,14 @@ def main():
     # Create assets directory if it doesn't exist
     assets_dir = os.path.join(script_dir, "assets")
     os.makedirs(assets_dir, exist_ok=True)
+
+    # Let user choose a camera
+    camera_index = choose_camera()
+    if camera_index is None:
+        return 1
+
+    # Set the camera selection as an environment variable
+    os.environ["GAME_CAMERA_INDEX"] = str(camera_index)
 
     # Run the game script
     try:
@@ -65,6 +128,7 @@ def main():
             "  • Stay still for a few seconds at the beginning to train the background model"
         )
 
+        print(f"\nUsing camera {camera_index}")
         print("\nStarting game... Please wait while initializing...")
         print("-" * 60)
 

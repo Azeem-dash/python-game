@@ -14,186 +14,156 @@ import cv2
 import numpy as np
 import pygame
 
-# Add the parent directory to sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
-
+# Game-specific imports
 try:
-    from src.game_objects import Character, Obstacle, ParticleSystem, Target
-    from src.simple_detection import SimpleHandDetector
-except ImportError:
-    # If src module not found, try importing from the local directory
+    # First try to import without src prefix (local files)
     from simple_detection import SimpleHandDetector
+except ImportError:
+    try:
+        # Fallback to importing from src
+        from src.simple_detection import SimpleHandDetector
+    except ImportError:
+        print("Error: Could not import hand detection module.")
+        sys.exit(1)
 
-    # Define minimal game objects if not available
-    class Character:
-        def __init__(self, x, y, size=50):
-            self.x = x
-            self.y = y
-            self.size = size
-            self.gesture = None
-            self.velocity = [0, 0]
-            self.max_speed = 10
-            self.target_position = (x, y)
-            self.is_attacking = False
-            self.attack_cooldown = 0
 
-        def update(self, delta_time):
-            # Calculate direction to target
-            dx = self.target_position[0] - self.x
-            dy = self.target_position[1] - self.y
-            distance = math.sqrt(dx**2 + dy**2)
+# Classes needed but missing from removed src folder
+class Character:
+    """The player character that moves around the screen."""
 
-            if distance > 5:
-                # Normalize direction
-                if distance > 0:
-                    dx /= distance
-                    dy /= distance
+    def __init__(self, x, y, width, height, color=(255, 0, 0)):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.color = color
+        self.velocity_x = 0
+        self.velocity_y = 0
+        self.speed = 5
+        self.jump_strength = -10
+        self.gravity = 0.5
+        self.on_ground = False
+        self.health = 100
+        self.score = 0
 
-                # Set velocity based on gesture
-                target_speed = self.max_speed
-                if self.gesture == "pointing":
-                    target_speed = self.max_speed * 1.5
-                elif self.gesture == "open_palm":
-                    target_speed = self.max_speed * 0.8
-                elif self.gesture == "closed_fist":
-                    target_speed = self.max_speed * 0.3
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, (self.x, self.y, self.width, self.height))
 
-                # Apply movement
-                self.x += dx * target_speed
-                self.y += dy * target_speed
+    def update(self):
+        # Apply gravity
+        self.velocity_y += self.gravity
 
-            # Handle attack cooldown
-            if self.attack_cooldown > 0:
-                self.attack_cooldown -= delta_time
+        # Update position
+        self.x += self.velocity_x
+        self.y += self.velocity_y
 
-        def set_gesture(self, gesture):
-            self.gesture = gesture
+    def jump(self):
+        if self.on_ground:
+            self.velocity_y = self.jump_strength
+            self.on_ground = False
 
-            # Special gesture handling
-            if gesture == "thumbs_up" and self.attack_cooldown <= 0:
-                self.is_attacking = True
-                self.attack_cooldown = 1.0  # 1 second cooldown
-            else:
-                self.is_attacking = False
 
-        def set_target_position(self, position):
-            self.target_position = position
+class Obstacle:
+    """A game obstacle that can damage the player."""
 
-        def get_rect(self):
-            return pygame.Rect(
-                self.x - self.size // 2, self.y - self.size // 2, self.size, self.size
-            )
+    def __init__(self, x, y, width, height, color=(255, 0, 0)):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.color = color
 
-        def draw(self, screen):
-            color = (50, 50, 255)  # Blue
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, (self.x, self.y, self.width, self.height))
 
-            # Change color based on gesture
-            if self.gesture == "open_palm":
-                color = (50, 255, 50)  # Green
-            elif self.gesture == "closed_fist":
-                color = (255, 50, 50)  # Red
-            elif self.gesture == "pointing":
-                color = (255, 255, 50)  # Yellow
-            elif self.gesture == "victory":
-                color = (50, 255, 255)  # Cyan
-            elif self.gesture == "thumbs_up":
-                color = (255, 50, 255)  # Magenta
+    def check_collision(self, character):
+        return (
+            self.x < character.x + character.width
+            and self.x + self.width > character.x
+            and self.y < character.y + character.height
+            and self.y + self.height > character.y
+        )
 
-            # Draw the character
-            pygame.draw.circle(
-                screen, color, (int(self.x), int(self.y)), self.size // 2
-            )
 
-            # Draw attack effect if attacking
-            if self.is_attacking:
-                pygame.draw.circle(
-                    screen,
-                    (255, 200, 0, 128),
-                    (int(self.x), int(self.y)),
-                    self.size * 1.5,
-                    5,
-                )
+class Target:
+    """A target that the player can collect for points."""
 
-    class Target:
-        def __init__(self, x, y, size=30, value=1, type="standard"):
-            self.x = x
-            self.y = y
-            self.size = size
-            self.value = value
-            self.type = type
-            self.collected = False
-            self.colors = {
-                "standard": (0, 255, 0),
-                "bonus": (255, 255, 0),
-                "special": (255, 0, 255),
-                "negative": (255, 0, 0),
+    def __init__(self, x, y, radius, color=(0, 255, 0)):
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.color = color
+        self.collected = False
+        self.value = 0
+
+    def draw(self, screen):
+        if not self.collected:
+            pygame.draw.circle(screen, self.color, (self.x, self.y), self.radius)
+
+    def check_collection(self, character):
+        if not self.collected:
+            if (
+                self.x > character.x
+                and self.x < character.x + character.width
+                and self.y > character.y
+                and self.y < character.y + character.height
+            ):
+                self.collected = True
+                return True
+        return False
+
+
+class ParticleSystem:
+    """A simple particle system for visual effects."""
+
+    def __init__(self):
+        self.particles = []
+
+    def add_particles(self, x, y, color, count=5):
+        for _ in range(count):
+            particle = {
+                "x": x,
+                "y": y,
+                "dx": random.uniform(-2, 2),
+                "dy": random.uniform(-2, 2),
+                "color": color,
+                "size": random.randint(2, 5),
+                "life": random.randint(10, 30),
             }
+            self.particles.append(particle)
 
-        def update(self, delta_time, screen_width, screen_height):
-            pass
+    def update(self):
+        for particle in self.particles[:]:
+            particle["x"] += particle["dx"]
+            particle["y"] += particle["dy"]
+            particle["life"] -= 1
+            if particle["life"] <= 0:
+                self.particles.remove(particle)
 
-        def draw(self, screen):
-            if self.collected:
-                return
-
-            color = self.colors.get(self.type, (0, 255, 0))
+    def draw(self, screen):
+        for particle in self.particles:
             pygame.draw.circle(
-                screen, color, (int(self.x), int(self.y)), self.size // 2
-            )
-
-        def get_rect(self):
-            return pygame.Rect(
-                self.x - self.size // 2, self.y - self.size // 2, self.size, self.size
-            )
-
-    class Obstacle:
-        def __init__(self, x, y, width, height, speed=0, moving=False):
-            self.x = x
-            self.y = y
-            self.width = width
-            self.height = height
-
-        def update(self, delta_time):
-            pass
-
-        def draw(self, screen):
-            pygame.draw.rect(
                 screen,
-                (150, 75, 0),
-                (int(self.x), int(self.y), self.width, self.height),
+                particle["color"],
+                (int(particle["x"]), int(particle["y"])),
+                particle["size"],
             )
-
-        def get_rect(self):
-            return pygame.Rect(self.x, self.y, self.width, self.height)
-
-    class ParticleSystem:
-        def __init__(self):
-            self.particles = []
-
-        def add_explosion(self, x, y, color, count=20, size=5, life=1.0):
-            pass
-
-        def update(self, delta_time):
-            pass
-
-        def draw(self, screen):
-            pass
 
 
 class SimplifiedGame:
-    """Simplified game class using basic OpenCV for hand tracking."""
+    """Main game class for the simplified game using OpenCV hand tracking."""
 
     def __init__(self):
-        # Initialize Pygame
+        """Initialize the game."""
+        # Initialize pygame
         pygame.init()
         pygame.font.init()
 
         # Set up display
-        self.width, self.height = 800, 600
+        self.width = 800
+        self.height = 600
         self.screen = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption("Hand Motion Game - Simplified")
+        pygame.display.set_caption("Simplified Hand Motion Game")
 
         # Set up clock
         self.clock = pygame.time.Clock()
@@ -202,10 +172,23 @@ class SimplifiedGame:
         self.last_time = time.time()
 
         # Set up webcam
-        self.cap = cv2.VideoCapture(0)
+        # Get camera index from environment variable or use default
+        try:
+            camera_index = int(os.environ.get("GAME_CAMERA_INDEX", 0))
+            print(f"Using camera index: {camera_index}")
+        except ValueError:
+            camera_index = 0
+            print(f"Invalid camera index format. Using default: {camera_index}")
+
+        self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
-            print("Error: Could not open camera.")
-            sys.exit()
+            print(
+                f"Error: Could not open camera {camera_index}. Trying fallback to camera 0..."
+            )
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap.isOpened():
+                print("Error: Could not open any camera.")
+                sys.exit()
 
         # Set up hand detector
         self.hand_detector = SimpleHandDetector()
@@ -219,7 +202,7 @@ class SimplifiedGame:
         self.time_remaining = 60  # seconds
 
         # Game objects
-        self.character = Character(self.width // 2, self.height // 2)
+        self.character = Character(self.width // 2, self.height // 2, 50, 50)
         self.targets = []
         self.obstacles = []
         self.particle_system = ParticleSystem()
@@ -240,12 +223,12 @@ class SimplifiedGame:
         self.font_small = pygame.font.SysFont(None, 32)
 
         # Set up colors
-        self.WHITE = (255, 255, 255)
         self.BLACK = (0, 0, 0)
-        self.RED = (255, 50, 50)
-        self.GREEN = (50, 255, 50)
-        self.BLUE = (50, 50, 255)
-        self.YELLOW = (255, 255, 50)
+        self.WHITE = (255, 255, 255)
+        self.RED = (255, 0, 0)
+        self.GREEN = (0, 255, 0)
+        self.BLUE = (0, 0, 255)
+        self.YELLOW = (255, 255, 0)
 
         # Initial level setup
         self.setup_level(self.level)
@@ -275,28 +258,25 @@ class SimplifiedGame:
         self.time_remaining = max(30, 60 - (level - 1) * 5)  # Decrease time per level
 
     def spawn_target(self):
-        """Spawn a new target at a random position."""
-        margin = 50
-        x = random.randint(margin, self.width - margin)
-        y = random.randint(margin, self.height - margin)
+        """Create a new target at a random position."""
+        # Generate random position
+        x = random.randint(50, self.width - 50)
+        y = random.randint(50, self.height - 50)
 
-        # Choose target type based on probability
-        target_type = "standard"
-        rand = random.random()
-        if rand > 0.9:
-            target_type = "special"
-            value = 5
-        elif rand > 0.7:
-            target_type = "bonus"
-            value = 2
-        elif rand > 0.95:
-            target_type = "negative"
-            value = -2
-        else:
-            value = 1
+        # Target types with different values
+        target_types = [
+            {"type": "standard", "value": 1, "color": self.GREEN},
+            {"type": "bonus", "value": 3, "color": self.YELLOW},
+            {"type": "special", "value": 5, "color": self.BLUE},
+        ]
+
+        # Select a random target type
+        target_info = random.choice(target_types)
 
         # Create target
-        self.targets.append(Target(x, y, 30, value, target_type))
+        target = Target(x, y, 15, target_info["color"])
+        target.value = target_info["value"]  # Add value attribute to the Target
+        self.targets.append(target)
 
     def spawn_obstacle(self):
         """Spawn a new obstacle at a random position."""
@@ -311,7 +291,7 @@ class SimplifiedGame:
         y = random.randint(margin, self.height - height - margin)
 
         # Create obstacle
-        self.obstacles.append(Obstacle(x, y, width, height))
+        self.obstacles.append(Obstacle(x, y, width, height, self.RED))
 
     def process_hand_tracking(self):
         """Process webcam input and track hands using simple OpenCV methods."""
@@ -352,11 +332,14 @@ class SimplifiedGame:
             )
 
             # Update character target position
-            self.character.set_target_position((screen_x, screen_y))
+            self.character.x = screen_x
+            self.character.y = screen_y
 
         # Update character gesture
         if self.current_gesture:
-            self.character.set_gesture(self.current_gesture)
+            self.character.color = self.WHITE
+        else:
+            self.character.color = self.RED
 
         # Add user instructions to the frame
         instruction = "Wave hand to start - Use hand gestures to control character"
@@ -416,60 +399,28 @@ class SimplifiedGame:
                 self.obstacle_spawn_timer = 0
 
             # Update character
-            self.character.update(self.delta_time)
+            self.character.update()
 
             # Update targets
             for target in self.targets:
-                target.update(self.delta_time, self.width, self.height)
+                if target.check_collection(self.character):
+                    target.collected = True
+                    self.score += target.value
+                    self.targets.remove(target)
 
             # Update obstacles
             for obstacle in self.obstacles:
-                obstacle.update(self.delta_time)
+                if obstacle.check_collision(self.character):
+                    self.lives -= 1
+                    if self.lives <= 0:
+                        self.game_over()
 
             # Update particles
-            self.particle_system.update(self.delta_time)
-
-            # Check for collisions
-            self.check_collisions()
+            self.particle_system.update()
 
             # Check for level completion (all targets collected)
             if len(self.targets) == 0:
                 self.level_up()
-
-    def check_collisions(self):
-        """Check for collisions between game objects."""
-        # Get character rectangle
-        char_rect = self.character.get_rect()
-
-        # Check for collisions with targets
-        targets_to_remove = []
-        for i, target in enumerate(self.targets):
-            if not target.collected and char_rect.colliderect(target.get_rect()):
-                # Handle collision with target
-                target.collected = True
-                targets_to_remove.append(i)
-
-                # Update score
-                self.score += target.value
-
-        # Remove collected targets
-        for i in sorted(targets_to_remove, reverse=True):
-            del self.targets[i]
-
-        # Check for collisions with obstacles
-        for obstacle in self.obstacles:
-            if char_rect.colliderect(obstacle.get_rect()):
-                # Handle collision with obstacle
-                self.handle_damage()
-                break
-
-    def handle_damage(self):
-        """Handle character taking damage."""
-        self.lives -= 1
-
-        # Check for game over
-        if self.lives <= 0:
-            self.game_over()
 
     def level_up(self):
         """Advance to the next level."""

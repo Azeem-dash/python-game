@@ -1,1 +1,0 @@
-"""Hand Motion Game Package."""

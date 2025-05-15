@@ -113,8 +113,22 @@ class PlatformerGame:
         self.max_world_offset = 2000  # How far the world extends to the right
 
         # Camera and hand tracking
-        self.camera_index = 0  # Default camera
+        # Get camera index from environment variable or use default
+        try:
+            self.camera_index = int(os.environ.get("GAME_CAMERA_INDEX", 0))
+            print(f"Using camera index: {self.camera_index}")
+        except ValueError:
+            self.camera_index = 0
+            print(f"Invalid camera index format. Using default: {self.camera_index}")
+
         self.cap = cv2.VideoCapture(self.camera_index)
+        if not self.cap.isOpened():
+            print(
+                f"Error: Could not open camera {self.camera_index}. Trying fallback to camera 0..."
+            )
+            self.camera_index = 0
+            self.cap = cv2.VideoCapture(self.camera_index)
+
         self.hand_detector = SimpleHandDetector()
 
         # Gesture controls

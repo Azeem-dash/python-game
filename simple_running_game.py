@@ -1,4 +1,6 @@
+import os
 import random
+import sys
 import time
 
 import cv2
@@ -227,7 +229,27 @@ class SimpleRunningGame:
             )
 
     def run(self):
-        cap = cv2.VideoCapture(0)
+        # Get camera index from environment variable or use default
+        try:
+            camera_index = int(os.environ.get("GAME_CAMERA_INDEX", 0))
+            print(f"Using camera index: {camera_index}")
+        except ValueError:
+            camera_index = 0
+            print(f"Invalid camera index format. Using default: {camera_index}")
+
+        cap = cv2.VideoCapture(camera_index)
+        if not cap.isOpened():
+            print(
+                f"Error: Could not open camera {camera_index}. Trying fallback to camera 0..."
+            )
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                print("Error: Could not open any camera.")
+                return
+
+        print("Running the Simple Running Game...")
+        print("Move your hand left/right to change lanes")
+        print("Press 'q' to quit")
 
         while cap.isOpened() and not self.game_over:
             ret, frame = cap.read()
